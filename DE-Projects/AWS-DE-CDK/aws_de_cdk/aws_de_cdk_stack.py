@@ -6,8 +6,11 @@ from aws_cdk import (
     aws_s3_notifications as s3n,
     aws_events as events,
     aws_events_targets as targets,
+    aws_athena as athena,
+    aws_glue as glue,
     Duration,
-    RemovalPolicy
+    RemovalPolicy,
+    CfnOutput
 )
 from constructs import Construct
 
@@ -58,14 +61,70 @@ class AwsDeCdkStack(Stack):
             s3.NotificationKeyFilter(suffix='.csv')  # Only trigger for CSV files
         )
 
-        # Output the bucket names
-        self.output_bucket_names(raw_bucket, staging_bucket)
+        # IAM policy for Lambda to access Athena and Glue
+        process_csv_lambda.add_to_role_policy(iam.PolicyStatement(
+            actions=[
+                "glue:*",
+                "athena:*",
+                "s3:*"
+            ],
+            resources=["*"]
+        ))
 
-    def output_bucket_names(self, raw_bucket: s3.Bucket, staging_bucket: s3.Bucket) -> None:
-        from aws_cdk import CfnOutput
+        # Athena WorkGroup
+        athena_workgroup = athena.CfnWorkGroup(self, "AthenaWorkGroup",
+                                               name="csv-to-parquet-workgroup",
+                                               work_group_configuration={
+                                                   "resultConfiguration": {
+                                                       "outputLocation": f"s3://{staging_bucket.bucket_name}/athena-results/"
+                                                   }
+                                               })
 
-        # Output Raw Bucket Name
+        # Glue Database
+        glue_db = glue.CfnDatabase(self, "GlueDatabase",
+                                   catalog_id=self.account,
+                                   database_input={
+                                       "name": "staging_data_db"
+                                   })
+
+        # Glue Table for the Parquet files in the staging bucket
+        glue_table = glue.CfnTable(self, "GlueTable",
+            catalog_id=self.account,
+            database_name="staging_data_db",
+            table_input={
+                "name": "staging_data_table",
+                "storageDescriptor": {
+                    "columns": [
+                        {"name": "Year", "type": "int"},
+                        {"name": "Industry_aggregation_NZSIOC", "type": "string"},
+                        {"name": "Industry_code_NZSIOC", "type": "string"},
+                        {"name": "Industry_name_NZSIOC", "type": "string"},
+                        {"name": "Units", "type": "string"},
+                        {"name": "Variable_code", "type": "string"},
+                        {"name": "Variable_name", "type": "string"},
+                        {"name": "Variable_category", "type": "string"},
+                        {"name": "Value", "type": "string"},
+                        {"name": "Industry_code_ANZSIC06", "type": "string"}
+                    ],
+                    "location": f"s3://{staging_bucket.bucket_name}/",
+                    "inputFormat": "org.apache.hadoop.hive.ql.io.parquet.MapredParquetInputFormat",
+                    "outputFormat": "org.apache.hadoop.hive.ql.io.parquet.MapredParquetOutputFormat",
+                    "serdeInfo": {
+                        "serializationLibrary": "org.apache.hadoop.hive.ql.io.parquet.serde.ParquetHiveSerDe"
+                    }
+                },
+                "tableType": "EXTERNAL_TABLE"
+            }
+        )
+
+        # Ensure Glue Table is created after the Glue Database
+        glue_table.add_dependency(glue_db)
+
+
+        # Outputs
         CfnOutput(self, "RawBucketName", value=raw_bucket.bucket_name)
-
-        # Output Staging Bucket Name
         CfnOutput(self, "StagingBucketName", value=staging_bucket.bucket_name)
+        CfnOutput(self, "LambdaFunctionArn", value=process_csv_lambda.function_arn)
+        CfnOutput(self, "AthenaWorkGroupName", value=athena_workgroup.name)
+
+    
