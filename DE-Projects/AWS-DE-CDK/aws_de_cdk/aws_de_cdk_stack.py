@@ -28,13 +28,10 @@ class AwsDeCdkStack(Stack):
             removal_policy=RemovalPolicy.DESTROY
         )
 
-        pandas_layer = _lambda.LayerVersion(self, "PandasLayer",
-            code=_lambda.Code.from_asset("lambda_layer/pandas_layer.zip")
+        pandas_layer = _lambda.LayerVersion.from_layer_version_arn(self, "PandasLayer",
+            layer_version_arn="arn:aws:lambda:us-east-2:336392948345:layer:AWSSDKPandas-Python39:25"
         )
 
-        pyarrow_layer = _lambda.LayerVersion(self, "PyarrowLayer",
-            code=_lambda.Code.from_asset("lambda_layer/pyarrow_layer.zip")
-        )
 
         # Create a Lambda function that will process the CSV and convert to Parquet
         process_csv_lambda = _lambda.Function(self, "ProcessCsvLambda",
@@ -46,7 +43,7 @@ class AwsDeCdkStack(Stack):
             environment={
                 'STAGING_BUCKET_NAME': staging_bucket.bucket_name
             },
-            layers=[pandas_layer, pyarrow_layer]
+            layers=[pandas_layer]
         )
 
 

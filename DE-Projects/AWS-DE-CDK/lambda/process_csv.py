@@ -1,7 +1,7 @@
 import os
 import boto3
 import pandas as pd
-from pyarrow import csv, parquet
+# from pyarrow import csv, parquet
 
 s3_client = boto3.client('s3')
 staging_bucket = os.environ['STAGING_BUCKET_NAME']
